@@ -1,0 +1,22 @@
+# STT
+sherpa-onnx>=1.12.0
+numpy>=1.24
+soundfile>=0.12
+
+# TTS (official SDK; weights auto-download to ~/.cache/supertonic3/)
+supertonic>=1.3.0
+
+# Optional mic
+sounddevice>=0.4.6
+
+# Web UI
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.9
+
+# Live LLM (interview turn) — same API shape as learning-agent
+openai>=1.40.0
+
+# Optional later (not required for this PoC):
+#   pip install 'supertonic[serve]'   # HTTP OpenAI-compatible server
+#   pip install 'supertonic-realtime'   # clause-level synthesize_stream fork

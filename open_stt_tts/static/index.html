@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Open STT/TTS — interview pipeline PoC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1412; --panel: #1a221e; --ink: #e8f0ea; --muted: #8fa396;
+      --line: #2c3a32; --accent: #3dd68c; --accent-ink: #0a1a12;
+      --warn: #e8b84a; --danger: #e86a5a; --llm: #5eb8e8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: "IBM Plex Sans", sans-serif; color: var(--ink);
+      background: radial-gradient(ellipse 80% 50% at 10% -10%, #1f3a2c 0%, transparent 55%), var(--bg);
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 1.5rem 1.1rem 3rem; }
+    h1 { font-family: "IBM Plex Mono", monospace; font-size: 1.25rem; margin: 0 0 0.35rem; }
+    .sub { color: var(--muted); margin: 0 0 1rem; font-size: 0.95rem; }
+    .status {
+      display: inline-flex; gap: 0.45rem; align-items: center; font-family: "IBM Plex Mono", monospace;
+      font-size: 0.75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 6px;
+      padding: 0.35rem 0.65rem; margin-bottom: 1rem; background: rgba(0,0,0,.25);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+    .dot.ok { background: var(--accent); } .dot.bad { background: var(--danger); }
+    section {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 1rem 1.1rem 1.15rem; margin-bottom: 0.85rem;
+    }
+    section h2 {
+      font-family: "IBM Plex Mono", monospace; font-size: 0.8rem; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--accent); margin: 0 0 0.75rem;
+    }
+    label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
+    textarea, select, input[type="text"] {
+      width: 100%; background: #121815; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 6px; padding: 0.5rem 0.6rem; font: inherit; margin-bottom: 0.65rem;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.55rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.2rem; }
+    button {
+      font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: 0.88rem;
+      border: none; border-radius: 6px; padding: 0.5rem 0.9rem; cursor: pointer;
+      background: var(--accent); color: var(--accent-ink);
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button.danger { background: transparent; color: var(--danger); border: 1px solid #5a3530; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.65rem; }
+    .chips button { font-size: 0.78rem; padding: 0.3rem 0.55rem; background: #243028; color: var(--ink); border: 1px solid var(--line); }
+    .chips button.active { border-color: var(--accent); color: var(--accent); }
+    .livebox {
+      font-family: "IBM Plex Mono", monospace; font-size: 0.82rem; line-height: 1.45;
+      background: #0c100e; border: 1px solid var(--line); border-radius: 6px;
+      padding: 0.7rem; min-height: 3.2rem; white-space: pre-wrap; word-break: break-word;
+      margin-top: 0.55rem; color: #c5d4c9;
+    }
+    .livebox .tok { color: var(--llm); }
+    .tag { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.25rem; }
+    .metrics { font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; color: var(--muted); margin-top: 0.4rem; }
+    audio { width: 100%; margin-top: 0.45rem; }
+    .mic-bar { height: 5px; background: #121815; border-radius: 3px; overflow: hidden; margin: 0.45rem 0; display: none; }
+    .mic-bar > span { display: block; height: 100%; width: 0%; background: var(--accent); }
+    .busy { color: var(--warn); font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; min-height: 1.1em; }
+    .clause { border-top: 1px solid var(--line); padding: 0.55rem 0; }
+    .clause:first-child { border-top: none; }
+    .pipeline {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin: 0.75rem 0 0.85rem;
+    }
+    @media (max-width: 640px) { .pipeline { grid-template-columns: 1fr 1fr; } }
+    .step {
+      border: 1px solid var(--line); border-radius: 8px; padding: 0.55rem 0.6rem; background: #121815;
+      min-height: 4.2rem;
+    }
+    .step .step-id {
+      font-family: "IBM Plex Mono", monospace; font-size: 0.68rem; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 0.2rem;
+    }
+    .step .step-state { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+    .step.idle .step-state { color: var(--muted); }
+    .step.active { border-color: var(--warn); }
+    .step.active .step-state { color: var(--warn); }
+    .step.ok { border-color: #2a5a40; }
+    .step.ok .step-state { color: var(--accent); }
+    .step.bad { border-color: #5a3530; }
+    .step.bad .step-state { color: var(--danger); }
+    .full-log {
+      font-family: "IBM Plex Mono", monospace; font-size: 0.75rem; line-height: 1.4;
+      color: var(--muted); max-height: 7.5rem; overflow: auto; margin-top: 0.55rem;
+      border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.6rem; background: #0c100e;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Interview pipeline PoC</h1>
+    <p class="sub">Same shape as production: chunked audio → streaming STT · live LLM tokens → TTS. Open models only — no main-app code.</p>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">checking…</span></div>
+
+    <section>
+      <h2>1 · STT (like Deepgram) — Nemotron</h2>
+      <p class="sub" style="margin-bottom:0.6rem">Audio in small chunks → live partials. Use mic or a sample wav paced like realtime frames.</p>
+      <div class="chips" id="samples"></div>
+      <div class="row">
+        <div>
+          <label for="sttLang">Language</label>
+          <input id="sttLang" type="text" value="en" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btnSample" type="button" disabled>Stream sample (chunked)</button>
+        <button id="btnMicStart" class="secondary" type="button">Start mic</button>
+        <button id="btnMicStop" class="danger" type="button" disabled>Stop mic</button>
+      </div>
+      <div class="mic-bar" id="micBar"><span id="micLevel"></span></div>
+      <div class="tag">Live transcript</div>
+      <div class="livebox" id="sttLive">—</div>
+      <div class="metrics" id="sttMetrics"></div>
+    </section>
+
+    <section>
+      <h2>2 · Live LLM → TTS (like OpenAI → Inworld)</h2>
+      <p class="sub" style="margin-bottom:0.6rem">Real OpenAI chat stream. As each sentence completes, Supertonic speaks it while the LLM continues.</p>
+      <label for="prompt">Candidate / user message (or use STT final below)</label>
+      <textarea id="prompt">Tell me about a challenging data pipeline you designed and how you monitored quality in production.</textarea>
+      <div class="row">
+        <div>
+          <label for="voice">Voice</label>
+          <select id="voice"></select>
+        </div>
+        <div>
+          <label for="ttsLang">TTS lang</label>
+          <input id="ttsLang" type="text" value="en" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btnUseStt" class="secondary" type="button">Use STT text as prompt</button>
+        <button id="btnTurn" type="button">Run live LLM → TTS</button>
+      </div>
+      <div class="tag">LLM tokens (streaming)</div>
+      <div class="livebox" id="llmLive">—</div>
+      <div class="metrics" id="llmMetrics"></div>
+      <div class="tag" style="margin-top:0.75rem">TTS clauses</div>
+      <div id="ttsClauses"></div>
+      <audio id="playAudio" controls></audio>
+    </section>
+
+    <section>
+      <h2>3 · Full turn</h2>
+      <p class="sub" style="margin-bottom:0.45rem">Mic → STT final → that text to live LLM → Supertonic speaks. Watch each stage below.</p>
+      <div class="pipeline" id="fullPipeline">
+        <div class="step idle" id="stepListen"><div class="step-id">1 · Listen</div><div class="step-state">Idle</div></div>
+        <div class="step idle" id="stepStt"><div class="step-id">2 · STT</div><div class="step-state">Idle</div></div>
+        <div class="step idle" id="stepLlm"><div class="step-id">3 · LLM</div><div class="step-state">Idle</div></div>
+        <div class="step idle" id="stepTts"><div class="step-id">4 · TTS</div><div class="step-state">Idle</div></div>
+      </div>
+      <div class="actions">
+        <button id="btnFull" type="button">Start full turn</button>
+        <button id="btnFullStop" class="danger" type="button" disabled>Stop listening → answer</button>
+      </div>
+      <div class="mic-bar" id="fullMicBar" style="display:none;margin-top:0.55rem"><span id="fullMicLevel"></span></div>
+      <div class="tag" style="margin-top:0.65rem">What we heard (STT)</div>
+      <div class="livebox" id="fullHeard">—</div>
+      <div class="tag" style="margin-top:0.55rem">Coach answer (LLM)</div>
+      <div class="livebox" id="fullAnswer">—</div>
+      <div class="metrics" id="fullMetrics"></div>
+      <div class="full-log" id="fullLog">Ready. Click Start, speak, then Stop listening → answer.</div>
+    </section>
+
+    <p class="busy" id="busy"></p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let selectedSample = null;
+    let sttFinal = "";
+    let micCtx = null;
+    let playQueue = [];
+    let playing = false;
+    let statusCache = null;
+    let fullMode = false;
+    let sttDoneWaiter = null;
+
+    function setBusy(msg) { $("busy").textContent = msg || ""; }
+
+    function fullLog(msg) {
+      const el = $("fullLog");
+      const t = new Date().toLocaleTimeString();
+      el.textContent = (el.textContent === "Ready. Click Start, speak, then Stop listening → answer." ? "" : el.textContent + "\n") + `[${t}] ${msg}`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function setStep(id, state, label) {
+      const el = $(id);
+      el.className = "step " + state;
+      el.querySelector(".step-state").textContent = label;
+    }
+
+    function resetFullPipeline() {
+      ["stepListen","stepStt","stepLlm","stepTts"].forEach((id) => setStep(id, "idle", "Idle"));
+      $("fullHeard").textContent = "—";
+      $("fullAnswer").textContent = "—";
+      $("fullMetrics").textContent = "";
+      $("fullLog").textContent = "Ready. Click Start, speak, then Stop listening → answer.";
+      $("fullMicBar").style.display = "none";
+    }
+
+    function enqueue(url) {
+      playQueue.push(url);
+      if (!playing) drain();
+    }
+    function drain() {
+      if (!playQueue.length) { playing = false; return; }
+      playing = true;
+      const a = $("playAudio");
+      a.src = playQueue.shift();
+      a.onended = () => drain();
+      a.onerror = () => drain();
+      a.play().catch(() => drain());
+    }
+
+    async function loadStatus() {
+      const s = await fetch("/api/status").then((r) => r.json());
+      statusCache = s;
+      const ok = s.stt_model_ready && s.openai_configured;
+      $("dot").className = "dot " + (ok ? "ok" : "bad");
+      $("statusText").textContent =
+        `STT ${s.stt_model_ready ? "ready" : "missing model"} · OpenAI ${s.openai_configured ? "ready" : "OPENAI_API_KEY missing"} · realtime ${s.realtime_fork?.sidecar_up ? "sidecar up" : "sidecar cold/off"}`;
+      const voice = $("voice");
+      voice.innerHTML = "";
+      (s.voices || ["M1"]).forEach((v) => {
+        const o = document.createElement("option");
+        o.value = v; o.textContent = v;
+        if (v === "M1") o.selected = true;
+        voice.appendChild(o);
+      });
+      const box = $("samples");
+      box.innerHTML = "";
+      (s.samples || []).forEach((sample) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = sample.id;
+        b.onclick = () => {
+          selectedSample = sample;
+          $("sttLang").value = sample.hint_lang === "en" ? "en" : sample.hint_lang;
+          box.querySelectorAll("button").forEach((x) => x.classList.remove("active"));
+          b.classList.add("active");
+          $("btnSample").disabled = false;
+        };
+        box.appendChild(b);
+      });
+    }
+
+    function openSttSocket() {
+      const lang = encodeURIComponent($("sttLang").value || "en");
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      return new WebSocket(`${proto}://${location.host}/ws/stt?language=${lang}`);
+    }
+
+    function wireSttSocket(ws, { onDone, onPartial } = {}) {
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "ready") {
+          if (fullMode) fullLog("STT websocket ready — sending mic audio");
+          return;
+        }
+        if (msg.type === "partial" || msg.type === "final") {
+          $("sttLive").textContent = msg.text;
+          if (msg.type === "final") sttFinal = msg.text;
+          $("sttMetrics").textContent =
+            `first_partial=${msg.first_partial_ms ?? "—"} ms · partials=${msg.partial_count ?? "—"} · audio_fed=${msg.audio_ms_fed ?? "—"} ms`;
+          if (onPartial) onPartial(msg);
+        }
+        if (msg.type === "done") {
+          sttFinal = msg.text || sttFinal;
+          $("sttLive").textContent = sttFinal || "—";
+          $("sttMetrics").textContent =
+            `DONE first_partial=${msg.first_partial_ms ?? "—"} ms · partials=${msg.partial_count} · audio=${msg.audio_ms} ms`;
+          if (onDone) onDone(msg);
+          if (sttDoneWaiter) {
+            sttDoneWaiter(msg);
+            sttDoneWaiter = null;
+          }
+        }
+        if (msg.type === "error") {
+          $("sttLive").textContent = "ERROR: " + msg.error;
+          setBusy("");
+          if (fullMode) {
+            setStep("stepStt", "bad", "Failed");
+            fullLog("STT error: " + msg.error);
+          }
+        }
+      };
+      return new Promise((resolve, reject) => {
+        ws.onopen = () => resolve(ws);
+        ws.onerror = () => reject(new Error("STT websocket failed"));
+      });
+    }
+
+    async function decodeWavToPcm16(arrayBuffer) {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const audio = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      const ch0 = audio.getChannelData(0);
+      let samples = ch0;
+      if (audio.sampleRate !== 16000) {
+        const n = Math.floor(ch0.length * 16000 / audio.sampleRate);
+        samples = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          samples[i] = ch0[Math.floor(i * audio.sampleRate / 16000)] || 0;
+        }
+      }
+      const pcm = new Int16Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      await ctx.close();
+      return pcm;
+    }
+
+    async function streamSampleChunked() {
+      if (!selectedSample) return;
+      setBusy("Streaming sample in ~100ms chunks…");
+      $("sttLive").textContent = "…";
+      const ws = openSttSocket();
+      await wireSttSocket(ws, { onDone: () => setBusy("") });
+      const res = await fetch("/api/sample-wav?id=" + encodeURIComponent(selectedSample.id));
+      if (!res.ok) {
+        setBusy("Fetching sample via form STT…");
+        const fd = new FormData();
+        fd.append("sample_id", selectedSample.id);
+        fd.append("language", $("sttLang").value);
+        fd.append("chunk_ms", "100");
+        const data = await fetch("/api/stt", { method: "POST", body: fd }).then((r) => r.json());
+        $("sttLive").textContent = data.text || "—";
+        sttFinal = data.text || "";
+        $("sttMetrics").textContent =
+          `REST chunked first_partial=${data.first_partial_ms} ms · partials=${data.partial_count} · streaming_ok=${data.streaming_ok}`;
+        ws.close();
+        setBusy("");
+        return;
+      }
+      const pcm = await decodeWavToPcm16(await res.arrayBuffer());
+      const frame = Math.floor(16000 * 0.1);
+      for (let i = 0; i < pcm.length; i += frame) {
+        const slice = pcm.subarray(i, Math.min(i + frame, pcm.length));
+        ws.send(slice.buffer.slice(slice.byteOffset, slice.byteOffset + slice.byteLength));
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      ws.send(JSON.stringify({ type: "end" }));
+    }
+
+    async function startMic(opts = {}) {
+      setBusy("Listening…");
+      $("sttLive").textContent = "…";
+      sttFinal = "";
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      const proc = ctx.createScriptProcessor(4096, 1, 1);
+      const ws = openSttSocket();
+      await wireSttSocket(ws, {
+        onPartial: opts.onPartial,
+        onDone: opts.onDone,
+      });
+      const bar = opts.levelBar || $("micBar");
+      const level = opts.levelFill || $("micLevel");
+      bar.style.display = "block";
+      const dataArr = new Uint8Array(analyser.frequencyBinCount);
+      let raf;
+      const tick = () => {
+        analyser.getByteFrequencyData(dataArr);
+        const avg = dataArr.reduce((a, b) => a + b, 0) / dataArr.length;
+        level.style.width = Math.min(100, avg) + "%";
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+      let frames = 0;
+      proc.onaudioprocess = (e) => {
+        const input = e.inputBuffer.getChannelData(0);
+        const pcm = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(pcm.buffer);
+          frames += 1;
+          if (fullMode && frames === 1) fullLog("Mic frames flowing to STT");
+        }
+      };
+      src.connect(proc);
+      proc.connect(ctx.destination);
+      micCtx = { ctx, proc, stream, ws, raf, analyser, bar };
+      $("btnMicStart").disabled = true;
+      $("btnMicStop").disabled = false;
+      return micCtx;
+    }
+
+    function stopMic() {
+      return new Promise((resolve) => {
+        if (!micCtx) {
+          resolve(null);
+          return;
+        }
+        const { ctx, proc, stream, ws, raf, bar } = micCtx;
+        const donePromise = new Promise((r) => {
+          sttDoneWaiter = r;
+          setTimeout(() => { if (sttDoneWaiter === r) { sttDoneWaiter = null; r(null); } }, 4000);
+        });
+        try { ws.send(JSON.stringify({ type: "end" })); } catch (_) {}
+        cancelAnimationFrame(raf);
+        try { proc.disconnect(); } catch (_) {}
+        stream.getTracks().forEach((t) => t.stop());
+        ctx.close();
+        if (bar) bar.style.display = "none";
+        $("micBar").style.display = "none";
+        $("btnMicStart").disabled = false;
+        $("btnMicStop").disabled = true;
+        micCtx = null;
+        setBusy("Finalizing transcript…");
+        donePromise.then((msg) => {
+          setBusy("");
+          resolve(msg);
+        });
+      });
+    }
+
+    async function runInterviewTurn(promptText, hooks = {}) {
+      const prompt = (promptText || $("prompt").value || "").trim();
+      if (!prompt) { alert("Enter a prompt"); return; }
+      setBusy("Streaming LLM → TTS…");
+      $("llmLive").innerHTML = "";
+      $("ttsClauses").innerHTML = "";
+      $("llmMetrics").textContent = "";
+      if (hooks.answerEl) hooks.answerEl.textContent = "";
+      playQueue = [];
+      playing = false;
+      const fd = new FormData();
+      fd.append("prompt", prompt);
+      fd.append("voice", $("voice").value);
+      fd.append("lang", $("ttsLang").value);
+      fd.append("speed", "1.05");
+      if (hooks.onStart) hooks.onStart(prompt);
+      const res = await fetch("/api/interview/turn", { method: "POST", body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = "ERROR: " + (err.detail || res.statusText);
+        $("llmLive").textContent = msg;
+        if (hooks.answerEl) hooks.answerEl.textContent = msg;
+        if (hooks.onError) hooks.onError(msg);
+        setBusy("");
+        return;
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let llmHtml = "";
+      let plain = "";
+      let sawToken = false;
+      let sawAudio = false;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const ev = JSON.parse(line);
+          if (ev.type === "llm_delta") {
+            if (!sawToken) {
+              sawToken = true;
+              if (hooks.onFirstToken) hooks.onFirstToken(ev);
+            }
+            plain += ev.text;
+            llmHtml += `<span class="tok">${escapeHtml(ev.text)}</span>`;
+            $("llmLive").innerHTML = llmHtml;
+            if (hooks.answerEl) hooks.answerEl.textContent = plain;
+            $("llmMetrics").textContent = `first_token=${ev.first_token_ms} ms · t=${ev.elapsed_ms} ms`;
+          }
+          if (ev.type === "tts_sending") {
+            const div = document.createElement("div");
+            div.className = "clause";
+            div.id = "c" + ev.index;
+            div.innerHTML = `<div class="tag">Speaking clause ${ev.index}</div><div>${escapeHtml(ev.text)}</div>`;
+            $("ttsClauses").prepend(div);
+          }
+          if (ev.type === "tts_audio") {
+            if (!sawAudio) {
+              sawAudio = true;
+              if (hooks.onFirstAudio) hooks.onFirstAudio(ev);
+            }
+            const div = $("c" + ev.index) || document.createElement("div");
+            div.className = "clause";
+            div.id = "c" + ev.index;
+            div.innerHTML = `<div class="tag">AUDIO clause ${ev.index} · ${ev.engine}</div>
+              <div>${escapeHtml(ev.text)}</div>
+              <div class="metrics">first_audio=${ev.first_audio_ms} ms · first_token=${ev.first_token_ms} ms · audio=${ev.audio_ms} ms</div>
+              <audio controls src="${ev.audio_url}?t=${Date.now()}"></audio>`;
+            if (!$("c" + ev.index)) $("ttsClauses").prepend(div);
+            enqueue(ev.audio_url + "?t=" + Date.now());
+            $("llmMetrics").textContent =
+              `first_token=${ev.first_token_ms} ms · first_audio=${ev.first_audio_ms} ms`;
+            if (hooks.onAudio) hooks.onAudio(ev);
+          }
+          if (ev.type === "done") {
+            $("llmMetrics").textContent =
+              `DONE first_token=${ev.first_token_ms} ms · first_audio=${ev.first_audio_ms} ms · clauses=${ev.clauses} · wall=${ev.wall_ms} ms`;
+            if (hooks.onDone) hooks.onDone(ev);
+          }
+          if (ev.type === "error") {
+            $("llmLive").textContent += "\nERROR: " + ev.error;
+            if (hooks.answerEl) hooks.answerEl.textContent += "\nERROR: " + ev.error;
+            if (hooks.onError) hooks.onError(ev.error);
+          }
+        }
+      }
+      setBusy("");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+
+    $("btnUseStt").onclick = () => {
+      if (sttFinal) $("prompt").value = sttFinal;
+    };
+    $("btnTurn").onclick = () => runInterviewTurn();
+    $("btnSample").onclick = () => streamSampleChunked();
+    $("btnMicStart").onclick = () => startMic().catch((e) => { $("sttLive").textContent = String(e); setBusy(""); });
+    $("btnMicStop").onclick = () => { stopMic(); };
+
+    $("btnFull").onclick = async () => {
+      if (micCtx) return;
+      fullMode = true;
+      resetFullPipeline();
+      $("btnFull").disabled = true;
+      $("btnFullStop").disabled = false;
+      setStep("stepListen", "active", "Requesting mic…");
+      fullLog("Starting full turn — requesting microphone");
+      try {
+        await startMic({
+          levelBar: $("fullMicBar"),
+          levelFill: $("fullMicLevel"),
+          onPartial: (msg) => {
+            setStep("stepListen", "ok", "Listening");
+            setStep("stepStt", "active", msg.type === "final" ? "Final…" : "Partials…");
+            $("fullHeard").textContent = msg.text || "…";
+            if (msg.partial_count === 1) fullLog("First STT partial received");
+          },
+        });
+        setStep("stepListen", "active", "Listening — speak now");
+        fullLog("Mic open. Speak, then click Stop listening → answer");
+        $("fullMetrics").textContent = "Listening… click Stop when finished speaking";
+      } catch (e) {
+        setStep("stepListen", "bad", "Mic failed");
+        fullLog("Mic error: " + e);
+        $("btnFull").disabled = false;
+        $("btnFullStop").disabled = true;
+        fullMode = false;
+      }
+    };
+
+    $("btnFullStop").onclick = async () => {
+      if (!fullMode) return;
+      $("btnFullStop").disabled = true;
+      setStep("stepListen", "ok", "Stopped");
+      setStep("stepStt", "active", "Finalizing…");
+      fullLog("Stop pressed — ending STT stream");
+      $("fullMetrics").textContent = "Finalizing transcript…";
+      const doneMsg = await stopMic();
+      const heard = (doneMsg && doneMsg.text) || sttFinal || "";
+      $("fullHeard").textContent = heard || "(empty)";
+      if (!heard.trim()) {
+        setStep("stepStt", "bad", "No text");
+        fullLog("STT returned empty — nothing to send to LLM");
+        $("fullMetrics").textContent = "No speech recognized. Try again.";
+        $("btnFull").disabled = false;
+        fullMode = false;
+        return;
+      }
+      setStep("stepStt", "ok", "Got transcript");
+      fullLog("STT final → sending to LLM: " + heard.slice(0, 120) + (heard.length > 120 ? "…" : ""));
+      $("prompt").value = heard;
+      setStep("stepLlm", "active", "Waiting for tokens…");
+      setStep("stepTts", "idle", "Queued");
+      $("fullAnswer").textContent = "…";
+      $("fullMetrics").textContent = "LLM streaming…";
+      await runInterviewTurn(heard, {
+        answerEl: $("fullAnswer"),
+        onStart: () => fullLog("POST /api/interview/turn started"),
+        onFirstToken: (ev) => {
+          setStep("stepLlm", "active", `Streaming (${ev.first_token_ms} ms)`);
+          fullLog("First LLM token at " + ev.first_token_ms + " ms");
+        },
+        onFirstAudio: (ev) => {
+          setStep("stepLlm", "ok", "Streaming");
+          setStep("stepTts", "active", `Speaking (${ev.first_audio_ms} ms)`);
+          fullLog("First TTS audio at " + ev.first_audio_ms + " ms");
+        },
+        onAudio: (ev) => {
+          setStep("stepTts", "active", `Clause ${ev.index} playing`);
+        },
+        onDone: (ev) => {
+          setStep("stepLlm", "ok", "Done");
+          setStep("stepTts", "ok", `${ev.clauses} clips`);
+          fullLog(`Turn complete — clauses=${ev.clauses} wall=${ev.wall_ms} ms`);
+          $("fullMetrics").textContent =
+            `Done · first_token=${ev.first_token_ms} ms · first_audio=${ev.first_audio_ms} ms · clauses=${ev.clauses}`;
+        },
+        onError: (err) => {
+          setStep("stepLlm", "bad", "Error");
+          setStep("stepTts", "bad", "Stopped");
+          fullLog("Pipeline error: " + err);
+          $("fullMetrics").textContent = "Error — see log";
+        },
+      });
+      $("btnFull").disabled = false;
+      fullMode = false;
+    };
+
+    loadStatus().catch((e) => {
+      $("dot").className = "dot bad";
+      $("statusText").textContent = String(e);
+    });
+  </script>
+</body>
+</html>

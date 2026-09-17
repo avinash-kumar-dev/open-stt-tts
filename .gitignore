@@ -1,0 +1,13 @@
+models/
+out/
+.venv/
+.venv-realtime/
+__pycache__/
+*.pyc
+.DS_Store
+*.wav
+*.ses
+.env
+.env.*
+!.env.example
+!fixtures/.gitkeep
