@@ -1,6 +1,6 @@
 # Open STT / TTS — interview demo
 
-Same lab as **http://127.0.0.1:8765**: mic/sample → Nemotron STT → OpenAI live tokens → Supertonic speech.
+Same lab mic/sample → Nemotron STT → OpenAI live tokens → Supertonic speech.
 
 TTS uses the **unofficial `supertonic-realtime` sidecar** (what the live demo runs). Official Supertonic is only a fallback.
 
